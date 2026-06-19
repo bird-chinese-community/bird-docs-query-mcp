@@ -104,6 +104,8 @@ def parse_markdown_manifest(text: str) -> list[DocEntry]:
     entries: list[DocEntry] = []
     base = "https://raw.githubusercontent.com/bird-chinese-community/bird-doc-markdown/master"
     for item in data.get("files", []):
+        if not isinstance(item, dict):
+            continue
         path = item.get("path", "")
         if not path.endswith(".md"):
             continue
@@ -228,6 +230,7 @@ def _query_docs(
     max_results: int,
     refresh: bool,
 ) -> dict[str, Any]:
+    max_results = max(1, min(50, max_results))
     entries: list[DocEntry] = []
 
     if lang == "zh" and version in ("2", "auto"):

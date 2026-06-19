@@ -22,6 +22,12 @@ A stdio MCP server that finds relevant BIRD routing-daemon documentation section
 - `query_bird_docs(query, lang="en", version="auto", max_results=5, refresh=false)`
 - `list_bird_doc_sources()`
 
+## Development
+
+- Run server: `uv run server.py`
+- Run tests: `uv run --group dev pytest -v`
+- Cache directory: `~/.cache/bird-docs-query-mcp/`
+
 ## Data sources
 
 - Chinese BIRD2: https://bird.xmsl.dev/llms.txt

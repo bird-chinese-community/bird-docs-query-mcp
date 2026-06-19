@@ -1,3 +1,6 @@
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from fastmcp.client import Client
 
@@ -44,3 +47,25 @@ async def test_query_bird_docs(client):
     top = results[0]
     text = f"{top['title']} {top['url']}".lower()
     assert any(k in text for k in ("data type", "bgp", "filter"))
+
+
+async def test_query_bird_docs_mocked(client):
+    fixture_path = Path(__file__).parent / "fixtures" / "llms.txt"
+    with patch("server.cached_fetch", return_value=fixture_path.read_text(encoding="utf-8")):
+        result = await client.call_tool(
+            "query_bird_docs",
+            {
+                "query": "数据类型",
+                "lang": "zh",
+                "version": "2",
+                "max_results": 5,
+            },
+        )
+    assert result.data is not None
+    results = result.data["results"]
+    assert isinstance(results, list)
+    assert len(results) > 0
+    assert any(
+        "数据类型" in r["title"] or "5-2-data-types.md" in r["url"]
+        for r in results
+    )
