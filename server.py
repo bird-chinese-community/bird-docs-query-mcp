@@ -327,11 +327,9 @@ def list_bird_doc_sources() -> dict[str, Any]:
         "sources": [
             {"lang": "zh", "version": "2", "source": "bird.xmsl.dev/llms.txt"},
             {"lang": "en", "version": "2/3", "source": "bird-doc-markdown"},
-            {"lang": "en/zh", "version": "2/3", "source": "bird.nic.cz official HTML (fallback)"},
+            {"lang": "en", "version": "2/3", "source": "bird.nic.cz official HTML (fallback)"},
         ]
     }
-
-
 
 
 if __name__ == "__main__":
