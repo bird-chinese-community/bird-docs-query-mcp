@@ -1,0 +1,14 @@
+[project]
+name = "bird-docs-query-mcp"
+version = "1.0.0"
+description = "BIRD documentation query MCP server"
+requires-python = ">=3.10"
+dependencies = ["fastmcp"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
