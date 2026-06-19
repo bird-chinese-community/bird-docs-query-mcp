@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -14,6 +15,10 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Literal
+
+# Avoid FastMCP's network-based update check, which can crash in SOCKS/proxied
+# environments where the optional ``socksio`` package is not installed.
+os.environ.setdefault("FASTMCP_CHECK_FOR_UPDATES", "off")
 
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
