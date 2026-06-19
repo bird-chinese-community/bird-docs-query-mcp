@@ -124,13 +124,35 @@ def parse_markdown_manifest(text: str) -> list[DocEntry]:
 class HeadingParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
-        self.sections: list[tuple[str, str, str]] = []
+        self.sections: list[tuple[str, str, str, str]] = []
         self._current_tag: str | None = None
         self._current_anchor: str = ""
-        self._current_text: str = ""
-        self._capture = False
+        self._current_heading: str = ""
+        self._current_body: str = ""
+        self._capture_heading = False
+        self._skip_depth = 0
+
+    def _flush(self) -> None:
+        heading = self._current_heading.strip()
+        if self._current_tag and heading:
+            self.sections.append(
+                (
+                    self._current_tag,
+                    self._current_anchor,
+                    heading,
+                    self._current_body.strip(),
+                )
+            )
+        self._current_tag = None
+        self._current_anchor = ""
+        self._current_heading = ""
+        self._current_body = ""
+        self._capture_heading = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style"):
+            self._skip_depth += 1
+            return
         if tag in ("h1", "h2", "h3"):
             self._flush()
             self._current_tag = tag
@@ -139,35 +161,40 @@ class HeadingParser(HTMLParser):
                 if name == "id":
                     self._current_anchor = value or ""
                     break
-            self._current_text = ""
-            self._capture = True
+            self._current_heading = ""
+            self._current_body = ""
+            self._capture_heading = True
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in ("h1", "h2", "h3") and self._capture:
-            self._flush()
-            self._capture = False
+        if tag in ("script", "style"):
+            self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if tag in ("h1", "h2", "h3") and self._capture_heading:
+            self._capture_heading = False
 
     def handle_data(self, data: str) -> None:
-        if self._capture:
-            self._current_text += data
+        if self._skip_depth:
+            return
+        if self._capture_heading:
+            self._current_heading += data
+        elif self._current_tag is not None:
+            self._current_body += data
 
-    def _flush(self) -> None:
-        if self._current_tag and self._current_text.strip():
-            self.sections.append(
-                (self._current_tag, self._current_anchor, self._current_text.strip())
-            )
-        self._current_tag = None
-        self._current_anchor = ""
-        self._current_text = ""
+    def close(self) -> None:
+        self._flush()
+        super().close()
 
 
 def parse_official_html(text: str, base_url: str) -> list[DocEntry]:
     parser = HeadingParser()
     parser.feed(text)
+    parser.close()
     entries: list[DocEntry] = []
-    for _tag, anchor, heading in parser.sections:
+    for _tag, anchor, heading, body in parser.sections:
         url = f"{base_url}#{anchor}" if anchor else base_url
-        entries.append(DocEntry(title=heading, url=url, source="bird.nic.cz", text=heading))
+        entries.append(
+            DocEntry(title=heading, url=url, source="bird.nic.cz", text=body)
+        )
     return entries
 
 
@@ -221,13 +248,21 @@ def _query_docs(
         except Exception as exc:
             log(f"failed to fetch manifest.json: {exc}")
 
-    if not entries and version in OFFICIAL_HTML_URLS:
-        try:
-            url = OFFICIAL_HTML_URLS[version]
-            text = cached_fetch(url, f"official-{version}.html", refresh)
-            entries.extend(parse_official_html(text, url))
-        except Exception as exc:
-            log(f"failed to fetch official html: {exc}")
+    if not entries:
+        versions_to_try = (
+            ["2", "3"]
+            if version == "auto"
+            else [version]
+            if version in OFFICIAL_HTML_URLS
+            else []
+        )
+        for v in versions_to_try:
+            try:
+                url = OFFICIAL_HTML_URLS[v]
+                text = cached_fetch(url, f"official-{v}.html", refresh)
+                entries.extend(parse_official_html(text, url))
+            except Exception as exc:
+                log(f"failed to fetch official html for version {v}: {exc}")
 
     for entry in entries:
         entry.relevance = score(query, entry)
@@ -294,8 +329,6 @@ def list_bird_doc_sources() -> dict[str, Any]:
     }
 
 
-# Expose the classic ``_tools`` attribute for quick introspection.
-mcp._tools = list(mcp._local_provider._components.values())
 
 
 if __name__ == "__main__":

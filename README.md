@@ -9,11 +9,13 @@ A stdio MCP server that finds relevant BIRD routing-daemon documentation section
   "mcpServers": {
     "bird-docs-query": {
       "command": "uv",
-      "args": ["run", "path/to/server.py"]
+      "args": ["run", "server.py"]
     }
   }
 }
 ```
+
+> Run the command from the repository root so that `server.py` resolves correctly.
 
 ## Tools
 
