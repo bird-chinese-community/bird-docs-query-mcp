@@ -9,8 +9,6 @@ import json
 import os
 import re
 import sys
-import time
-import urllib.request
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -25,8 +23,7 @@ os.environ.setdefault("FASTMCP_SHOW_SERVER_BANNER", "false")
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-CACHE_DIR = Path.home() / ".cache" / "bird-docs-query-mcp"
-CACHE_TTL_SECONDS = 24 * 60 * 60
+from fetcher import FetchResult, cached_fetch
 
 OFFICIAL_HTML_URLS = {
     "2": "https://bird.nic.cz/doc/bird-2.19.1.html",
@@ -54,32 +51,6 @@ class DocEntry:
 def log(message: str) -> None:
     sys.stderr.write(message + "\n")
     sys.stderr.flush()
-
-
-def fetch_text(url: str, timeout: int = 30, max_bytes: int = 10 * 1024 * 1024) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "bird-docs-query-mcp/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read(max_bytes + 1)
-        if len(data) > max_bytes:
-            raise RuntimeError(f"response from {url} exceeds {max_bytes} bytes")
-        return data.decode("utf-8", errors="replace")
-
-
-def cached_fetch(url: str, cache_name: str, refresh: bool = False) -> str:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = CACHE_DIR / cache_name
-    meta_path = CACHE_DIR / f"{cache_name}.meta"
-    if not refresh and cache_path.exists() and meta_path.exists():
-        try:
-            mtime = float(meta_path.read_text(encoding="utf-8").strip())
-            if time.time() - mtime < CACHE_TTL_SECONDS:
-                return cache_path.read_text(encoding="utf-8")
-        except Exception:
-            pass
-    text = fetch_text(url)
-    cache_path.write_text(text, encoding="utf-8")
-    meta_path.write_text(str(time.time()), encoding="utf-8")
-    return text
 
 
 def parse_llms_index(text: str) -> list[DocEntry]:
@@ -234,24 +205,39 @@ def _query_docs(
 ) -> dict[str, Any]:
     max_results = max(1, min(50, max_results))
     entries: list[DocEntry] = []
+    sources: list[dict[str, Any]] = []
+
+    def add_source(name: str, result: FetchResult) -> None:
+        status: dict[str, Any] = {
+            "source": name,
+            "ok": result.ok,
+            "used_cache": result.used_cache,
+        }
+        if result.error:
+            status["error"] = result.error
+        sources.append(status)
 
     if lang == "zh" and version in ("2", "auto"):
-        try:
-            text = cached_fetch("https://bird.xmsl.dev/llms.txt", "llms.txt", refresh)
-            entries.extend(parse_llms_index(text))
-        except Exception as exc:
-            log(f"failed to fetch llms.txt: {exc}")
+        result = cached_fetch(
+            "https://bird.xmsl.dev/llms.txt",
+            "llms.txt",
+            source="bird.xmsl.dev",
+            refresh=refresh,
+        )
+        add_source("bird.xmsl.dev", result)
+        if result.ok:
+            entries.extend(parse_llms_index(result.text))
 
     if lang == "en" and version in ("2", "3", "auto"):
-        try:
-            text = cached_fetch(
-                "https://raw.githubusercontent.com/bird-chinese-community/bird-doc-markdown/master/manifest.json",
-                "manifest.json",
-                refresh,
-            )
-            entries.extend(parse_markdown_manifest(text))
-        except Exception as exc:
-            log(f"failed to fetch manifest.json: {exc}")
+        result = cached_fetch(
+            "https://raw.githubusercontent.com/bird-chinese-community/bird-doc-markdown/master/manifest.json",
+            "manifest.json",
+            source="bird-doc-markdown",
+            refresh=refresh,
+        )
+        add_source("bird-doc-markdown", result)
+        if result.ok:
+            entries.extend(parse_markdown_manifest(result.text))
 
     if not entries:
         versions_to_try = (
@@ -262,12 +248,11 @@ def _query_docs(
             else []
         )
         for v in versions_to_try:
-            try:
-                url = OFFICIAL_HTML_URLS[v]
-                text = cached_fetch(url, f"official-{v}.html", refresh)
-                entries.extend(parse_official_html(text, url))
-            except Exception as exc:
-                log(f"failed to fetch official html for version {v}: {exc}")
+            url = OFFICIAL_HTML_URLS[v]
+            result = cached_fetch(url, f"official-{v}.html", source="bird.nic.cz", refresh=refresh)
+            add_source("bird.nic.cz", result)
+            if result.ok:
+                entries.extend(parse_official_html(result.text, url))
 
     for entry in entries:
         entry.relevance = score(query, entry)
@@ -277,7 +262,9 @@ def _query_docs(
 
     fallback = None
     if not top:
-        if lang == "zh" and version == "3":
+        if not any(s["ok"] for s in sources):
+            fallback = "All documentation sources are currently unavailable. Please try again later."
+        elif lang == "zh" and version == "3":
             fallback = (
                 "Chinese BIRD3 community snapshot not available; "
                 "try English BIRD3 results or official HTML."
@@ -299,6 +286,7 @@ def _query_docs(
             for e in top
         ],
         "fallback": fallback,
+        "sources": sources,
     }
 
 
