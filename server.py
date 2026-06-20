@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["fastmcp"]
+# dependencies = ["fastmcp>=3,<4"]
 # ///
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ from typing import Any, Literal
 # Avoid FastMCP's network-based update check, which can crash in SOCKS/proxied
 # environments where the optional ``socksio`` package is not installed.
 os.environ.setdefault("FASTMCP_CHECK_FOR_UPDATES", "off")
+# Keep stdio transport clean of startup banners that some MCP hosts treat as errors.
+os.environ.setdefault("FASTMCP_SHOW_SERVER_BANNER", "false")
 
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
