@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 from fastmcp.client import Client
 
+from fetcher import FetchResult
 from server import (
     DocEntry,
     mcp,
@@ -85,12 +86,22 @@ def test_tokenize_and_score():
 async def test_query_bird_docs_mocked(client, lang, fixture_name, query):
     fixtures_dir = Path(__file__).parent / "fixtures"
 
-    def mock_fetch(url, cache_name, refresh=False):
+    def mock_fetch(url, cache_name, *, source="", refresh=False):
         if cache_name == "llms.txt":
-            return (fixtures_dir / "llms.txt").read_text(encoding="utf-8")
+            return FetchResult(
+                ok=True,
+                text=(fixtures_dir / "llms.txt").read_text(encoding="utf-8"),
+                error=None,
+                source="bird.xmsl.dev",
+            )
         if cache_name == "manifest.json":
-            return (fixtures_dir / "manifest.json").read_text(encoding="utf-8")
-        return ""
+            return FetchResult(
+                ok=True,
+                text=(fixtures_dir / "manifest.json").read_text(encoding="utf-8"),
+                error=None,
+                source="bird-doc-markdown",
+            )
+        return FetchResult(ok=True, text="", error=None, source=source)
 
     with patch("server.cached_fetch", side_effect=mock_fetch):
         result = await client.call_tool(
@@ -116,3 +127,39 @@ async def test_query_bird_docs_mocked(client, lang, fixture_name, query):
             "data types" in r["title"].lower() or "data-types.md" in r["url"]
             for r in results
         )
+
+
+async def test_query_bird_docs_partial_failure(client):
+    fixtures_dir = Path(__file__).parent / "fixtures"
+
+    def mock_fetch(url, cache_name, *, source="", refresh=False):
+        if cache_name == "manifest.json":
+            return FetchResult(
+                ok=False,
+                text="",
+                error="HTTP 503",
+                source="bird-doc-markdown",
+            )
+        if cache_name == "official-2.html":
+            return FetchResult(
+                ok=True,
+                text='<h2 id="data-types">Data Types</h2><p>Information about data types.</p>',
+                error=None,
+                source="bird.nic.cz",
+            )
+        return FetchResult(ok=False, text="", error="HTTP 503", source=source)
+
+    with patch("server.cached_fetch", side_effect=mock_fetch):
+        result = await client.call_tool(
+            "query_bird_docs",
+            {"query": "data types", "lang": "en", "version": "2"},
+        )
+
+    data = result.data
+    assert data is not None
+    assert len(data["results"]) > 0
+    assert "sources" in data
+    ok_sources = [s for s in data["sources"] if s["ok"]]
+    failed_sources = [s for s in data["sources"] if not s["ok"]]
+    assert len(ok_sources) >= 1
+    assert len(failed_sources) >= 1
